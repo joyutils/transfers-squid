@@ -45,7 +45,7 @@ function getTransferEvents(ctx: ProcessorContext<Store>): TransferEvent[] {
                 }
                 const withdrawEvent = call.events.find(e => e.name === events.balances.withdraw.name)
                 if (!withdrawEvent) {
-                    throw new  Error(`Transfer call without withdraw event: ${call.extrinsic?.hash}`)
+                    console.warn(`No withdraw event found for extrinsic ${call.extrinsic?.hash}`)
                 }
                 let rec: {from: string; to: string; amount: bigint}
                 if (events.balances.transfer.v1000.is(event)) {
@@ -56,7 +56,7 @@ function getTransferEvents(ctx: ProcessorContext<Store>): TransferEvent[] {
                     throw new Error('Unsupported spec')
                 }
                 let fee = 0n
-                if (events.balances.withdraw.v1000.is(withdrawEvent)) {
+                if (withdrawEvent && events.balances.withdraw.v1000.is(withdrawEvent)) {
                     const { amount } = events.balances.withdraw.v1000.decode(withdrawEvent)
                     fee = amount
                 }
