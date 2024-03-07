@@ -1,0 +1,57 @@
+version: '3'
+
+services:
+  transfers-db:
+    container_name: transfers-db
+    hostname: transfers-db
+    image: postgres:14
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_PASSWORD: ${DB_PASS}
+    networks:
+      - joystream
+    shm_size: 1g
+    volumes:
+      - transfers-db-data:/var/lib/postgresql/data
+
+  transfers-processor:
+    image: transfers-squid
+    container_name: transfers-processor
+    hostname: transfers-processor
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - DB_HOST=transfers-db
+    networks:
+      - joystream
+    depends_on:
+      - transfers-db
+    command: ["sqd", "process:prod"]
+
+  transfers-graphql-server:
+    container_name: transfers-graphql-server
+    hostname: transfers-graphql-server
+    image: transfers-squid
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - DB_HOST=transfers-db
+    depends_on:
+      - transfers-db
+    command: ["sqd", "serve:prod"]
+    ports:
+      - '${GQL_PORT}:${GQL_PORT}'
+    networks:
+      - joystream
+
+volumes:
+  transfers-db-data:
+
+  # Join default joystream network (from joystream monorepo docker-compose.yml) to connect will Argus/Colossus nodes
+networks:
+  joystream:
+    external: true
+    name: joystream_default

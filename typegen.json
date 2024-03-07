@@ -1,0 +1,15 @@
+{
+  "outDir": "src/types",
+  "specVersions": "https://v2.archive.subsquid.io/metadata/joystream",
+  "pallets": {
+    "Balances": {
+      "events": true,
+      "calls": true,
+      "storage": [],
+      "constants": []
+    },
+    "System": {
+      "events": ["ExtrinsicSuccess", "ExtrinsicFailed"]
+    }
+  }
+}
