@@ -10,6 +10,10 @@
     },
     "System": {
       "events": ["ExtrinsicSuccess", "ExtrinsicFailed"]
+    },
+    "Members": {
+      "calls": ["member_remark"],
+      "events": ["MemberRemarked"]
     }
   }
 }

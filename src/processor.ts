@@ -32,40 +32,21 @@ export const processor = new SubstrateBatchProcessor()
     extrinsic: true,
     events: true,
   })
-  .setFields({
-    event: {
-      args: true,
-    },
-    extrinsic: {
-      hash: true,
-      fee: true,
-    },
-    block: {
-      timestamp: true,
-    },
-  })
   .addCall({
     name: [calls.balances.transferAll.name],
     extrinsic: true,
     events: true,
-  })
-  .setFields({
-    event: {
-      args: true,
-    },
-    extrinsic: {
-      hash: true,
-      fee: true,
-    },
-    block: {
-      timestamp: true,
-    },
   })
   .addCall({
     name: [calls.balances.transferKeepAlive.name],
     extrinsic: true,
     events: true,
   })
+  .addCall({
+    name: [calls.members.memberRemark.name],
+    extrinsic: true,
+    events: true,
+  })
   .setFields({
     event: {
       args: true,
@@ -73,6 +54,7 @@ export const processor = new SubstrateBatchProcessor()
     extrinsic: {
       hash: true,
       fee: true,
+      signature: true,
     },
     block: {
       timestamp: true,

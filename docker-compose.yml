@@ -12,6 +12,8 @@ services:
     networks:
       - joystream
     shm_size: 1g
+#    ports:
+#        - 5432:5432
     volumes:
       - transfers-db-data:/var/lib/postgresql/data
 

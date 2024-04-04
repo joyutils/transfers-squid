@@ -7,6 +7,8 @@ import { processor, ProcessorContext } from "./processor"
 import { Account, Transfer } from "./model"
 import { calls, events } from "./types"
 
+const addressCodec = ss58.codec("joystream")
+
 processor.run(new TypeormDatabase({ supportHotBlocks: true }), async (ctx) => {
   let transferEvents: TransferEvent[] = getTransferEvents(ctx)
 
@@ -27,6 +29,8 @@ interface TransferEvent {
   to: string
   amount: bigint
   fee?: bigint
+  type: "transfer" | "remark"
+  remark?: string
 }
 
 function getTransferEvents(ctx: ProcessorContext<Store>): TransferEvent[] {
@@ -34,24 +38,25 @@ function getTransferEvents(ctx: ProcessorContext<Store>): TransferEvent[] {
   let transfers: TransferEvent[] = []
   for (let block of ctx.blocks) {
     for (let call of block.calls) {
+      const isFailed = call.events.find(
+        (e) => e.name === events.system.extrinsicFailed.name,
+      )
+      if (isFailed) {
+        continue
+      }
+
       if (
         call.name === calls.balances.transfer.name ||
         call.name === calls.balances.transferAll.name ||
         call.name === calls.balances.transferKeepAlive.name
       ) {
-        const isFailed = call.events.find(
-          (e) => e.name === events.system.extrinsicFailed.name,
-        )
-        if (isFailed) {
-          continue
-        }
         const event = call.events.find(
           (e) => e.name === events.balances.transfer.name,
         )
         if (!event) {
           continue
         }
-        const withdrawEvent = call.events.find(
+        const withdrawEvent = call.extrinsic?.events.find(
           (e) => e.name === events.balances.withdraw.name,
         )
         if (!withdrawEvent) {
@@ -67,12 +72,13 @@ function getTransferEvents(ctx: ProcessorContext<Store>): TransferEvent[] {
         } else {
           throw new Error("Unsupported spec")
         }
-        let fee = 0n
+        let totalFee = 0n
         if (withdrawEvent && events.balances.withdraw.v1000.is(withdrawEvent)) {
           const { amount } =
             events.balances.withdraw.v1000.decode(withdrawEvent)
-          fee = amount
+          totalFee = amount
         }
+        const fee = totalFee / BigInt(call.extrinsic?.subcalls.length || 1)
 
         assert(
           block.header.timestamp,
@@ -85,10 +91,75 @@ function getTransferEvents(ctx: ProcessorContext<Store>): TransferEvent[] {
           blockHash: block.header.hash,
           timestamp: new Date(block.header.timestamp),
           extrinsicHash: event.extrinsic?.hash,
-          from: ss58.codec("joystream").encode(rec.from),
-          to: ss58.codec("joystream").encode(rec.to),
+          from: addressCodec.encode(rec.from),
+          to: addressCodec.encode(rec.to),
           amount: rec.amount,
           fee: fee,
+          type: "transfer",
+        })
+      } else if (call.name === calls.members.memberRemark.name) {
+        const event = call.events.find(
+          (e) => e.name === events.members.memberRemarked.name,
+        )
+        if (!event) {
+          continue
+        }
+        let rec: { from: string; remark: string; to: string; amount: bigint }
+        if (events.members.memberRemarked.v1000.is(event)) {
+          // v1000 remark has no payment
+          continue
+        } else if (events.members.memberRemarked.v2001.is(event)) {
+          const [_, remark, maybePayment] =
+            events.members.memberRemarked.v2001.decode(event)
+          if (!maybePayment) {
+            // we don't care about remarks without payment
+            continue
+          }
+
+          rec = {
+            from: addressCodec.encode(
+              call.extrinsic?.signature?.address as string,
+            ),
+            remark,
+            to: addressCodec.encode(maybePayment[0]),
+            amount: maybePayment[1],
+          }
+        } else {
+          throw new Error("Unsupported spec")
+        }
+        const withdrawEvent = call.extrinsic?.events.find(
+          (e) => e.name === events.balances.withdraw.name,
+        )
+        if (!withdrawEvent) {
+          console.warn(
+            `No withdraw event found for extrinsic ${call.extrinsic?.hash}`,
+          )
+        }
+        let totalFee = 0n
+        if (withdrawEvent && events.balances.withdraw.v1000.is(withdrawEvent)) {
+          const { amount } =
+            events.balances.withdraw.v1000.decode(withdrawEvent)
+          totalFee = amount
+        }
+        const fee = totalFee / BigInt(call.extrinsic?.subcalls.length || 1)
+
+        assert(
+          block.header.timestamp,
+          `Got an undefined timestamp at block ${block.header.height}`,
+        )
+
+        transfers.push({
+          id: event.id,
+          blockNumber: block.header.height,
+          blockHash: block.header.hash,
+          timestamp: new Date(block.header.timestamp),
+          extrinsicHash: event.extrinsic?.hash,
+          from: rec.from,
+          to: rec.to,
+          fee: fee,
+          amount: rec.amount,
+          type: "remark",
+          remark: rec.remark,
         })
       }
     }
@@ -133,8 +204,17 @@ function createTransfers(
 ): Transfer[] {
   let transfers: Transfer[] = []
   for (let t of transferEvents) {
-    let { id, blockNumber, blockHash, timestamp, extrinsicHash, amount, fee } =
-      t
+    let {
+      id,
+      blockNumber,
+      blockHash,
+      timestamp,
+      extrinsicHash,
+      amount,
+      fee,
+      remark,
+      type,
+    } = t
     let from = accounts.get(t.from)
     let to = accounts.get(t.to)
     transfers.push(
@@ -148,6 +228,8 @@ function createTransfers(
         to,
         amount,
         fee,
+        type,
+        remark,
       }),
     )
   }
