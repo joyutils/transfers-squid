@@ -41,9 +41,13 @@ export class Transfer {
     @Column_("numeric", {transformer: marshal.bigintTransformer, nullable: false})
     fee!: bigint
 
+    @Index_()
     @Column_("text", {nullable: false})
     type!: string
 
     @Column_("text", {nullable: true})
     remark!: string | undefined | null
+
+    @Column_("numeric", {transformer: marshal.bigintTransformer, nullable: true})
+    vestingDurationBlocks!: bigint | undefined | null
 }

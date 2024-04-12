@@ -29,8 +29,9 @@ interface TransferEvent {
   to: string
   amount: bigint
   fee?: bigint
-  type: "transfer" | "remark"
+  type: "transfer" | "remark" | "vested"
   remark?: string
+  vestingDurationBlocks?: bigint
 }
 
 function getTransferEvents(ctx: ProcessorContext<Store>): TransferEvent[] {
@@ -38,12 +39,28 @@ function getTransferEvents(ctx: ProcessorContext<Store>): TransferEvent[] {
   let transfers: TransferEvent[] = []
   for (let block of ctx.blocks) {
     for (let call of block.calls) {
-      const isFailed = call.events.find(
-        (e) => e.name === events.system.extrinsicFailed.name,
-      )
+      const isFailed =
+        call.events.find(
+          (e) => e.name === events.system.extrinsicFailed.name,
+        ) || call.events.length === 0
       if (isFailed) {
         continue
       }
+
+      const withdrawEvent = call.extrinsic?.events.find(
+        (e) => e.name === events.balances.withdraw.name,
+      )
+      if (!withdrawEvent) {
+        console.warn(
+          `No withdraw event found for extrinsic ${call.extrinsic?.hash}`,
+        )
+      }
+      let totalFee = 0n
+      if (withdrawEvent && events.balances.withdraw.v1000.is(withdrawEvent)) {
+        const { amount } = events.balances.withdraw.v1000.decode(withdrawEvent)
+        totalFee = amount
+      }
+      const fee = totalFee / BigInt(call.extrinsic?.subcalls.length || 1)
 
       if (
         call.name === calls.balances.transfer.name ||
@@ -56,14 +73,7 @@ function getTransferEvents(ctx: ProcessorContext<Store>): TransferEvent[] {
         if (!event) {
           continue
         }
-        const withdrawEvent = call.extrinsic?.events.find(
-          (e) => e.name === events.balances.withdraw.name,
-        )
-        if (!withdrawEvent) {
-          console.warn(
-            `No withdraw event found for extrinsic ${call.extrinsic?.hash}`,
-          )
-        }
+
         let rec: { from: string; to: string; amount: bigint }
         if (events.balances.transfer.v1000.is(event)) {
           const { from, to, amount } =
@@ -72,13 +82,6 @@ function getTransferEvents(ctx: ProcessorContext<Store>): TransferEvent[] {
         } else {
           throw new Error("Unsupported spec")
         }
-        let totalFee = 0n
-        if (withdrawEvent && events.balances.withdraw.v1000.is(withdrawEvent)) {
-          const { amount } =
-            events.balances.withdraw.v1000.decode(withdrawEvent)
-          totalFee = amount
-        }
-        const fee = totalFee / BigInt(call.extrinsic?.subcalls.length || 1)
 
         assert(
           block.header.timestamp,
@@ -86,7 +89,7 @@ function getTransferEvents(ctx: ProcessorContext<Store>): TransferEvent[] {
         )
 
         transfers.push({
-          id: event.id,
+          id: call.id,
           blockNumber: block.header.height,
           blockHash: block.header.hash,
           timestamp: new Date(block.header.timestamp),
@@ -102,6 +105,9 @@ function getTransferEvents(ctx: ProcessorContext<Store>): TransferEvent[] {
           (e) => e.name === events.members.memberRemarked.name,
         )
         if (!event) {
+          console.warn(
+            `no memberRemarked event found for extrinsic ${call.extrinsic?.hash}`,
+          )
           continue
         }
         let rec: { from: string; remark: string; to: string; amount: bigint }
@@ -127,21 +133,6 @@ function getTransferEvents(ctx: ProcessorContext<Store>): TransferEvent[] {
         } else {
           throw new Error("Unsupported spec")
         }
-        const withdrawEvent = call.extrinsic?.events.find(
-          (e) => e.name === events.balances.withdraw.name,
-        )
-        if (!withdrawEvent) {
-          console.warn(
-            `No withdraw event found for extrinsic ${call.extrinsic?.hash}`,
-          )
-        }
-        let totalFee = 0n
-        if (withdrawEvent && events.balances.withdraw.v1000.is(withdrawEvent)) {
-          const { amount } =
-            events.balances.withdraw.v1000.decode(withdrawEvent)
-          totalFee = amount
-        }
-        const fee = totalFee / BigInt(call.extrinsic?.subcalls.length || 1)
 
         assert(
           block.header.timestamp,
@@ -149,7 +140,7 @@ function getTransferEvents(ctx: ProcessorContext<Store>): TransferEvent[] {
         )
 
         transfers.push({
-          id: event.id,
+          id: call.id,
           blockNumber: block.header.height,
           blockHash: block.header.hash,
           timestamp: new Date(block.header.timestamp),
@@ -160,6 +151,50 @@ function getTransferEvents(ctx: ProcessorContext<Store>): TransferEvent[] {
           amount: rec.amount,
           type: "remark",
           remark: rec.remark,
+        })
+      } else if (call.name === calls.vesting.vestedTransfer.name) {
+        let rec: {
+          from: string
+          to: string
+          amount: bigint
+          vestingDurationBlocks: bigint
+        }
+        if (calls.vesting.vestedTransfer.v1000.is(call)) {
+          const { target, schedule } =
+            calls.vesting.vestedTransfer.v1000.decode(call)
+          const { locked, perBlock, startingBlock } = schedule
+
+          const vestingDuration = locked / perBlock
+          const vestingDelay = Math.max(startingBlock - block.header.height, 0)
+          rec = {
+            from: addressCodec.encode(
+              call.extrinsic?.signature?.address as string,
+            ),
+            to: addressCodec.encode(target),
+            amount: locked,
+            vestingDurationBlocks: vestingDuration + BigInt(vestingDelay),
+          }
+        } else {
+          throw new Error("Unsupported spec")
+        }
+
+        assert(
+          block.header.timestamp,
+          `Got an undefined timestamp at block ${block.header.height}`,
+        )
+
+        transfers.push({
+          id: call.id,
+          blockNumber: block.header.height,
+          blockHash: block.header.hash,
+          timestamp: new Date(block.header.timestamp),
+          extrinsicHash: call.extrinsic?.hash,
+          from: rec.from,
+          to: rec.to,
+          amount: rec.amount,
+          fee: fee,
+          type: "vested",
+          vestingDurationBlocks: rec.vestingDurationBlocks,
         })
       }
     }
@@ -214,6 +249,7 @@ function createTransfers(
       fee,
       remark,
       type,
+      vestingDurationBlocks,
     } = t
     let from = accounts.get(t.from)
     let to = accounts.get(t.to)
@@ -230,6 +266,7 @@ function createTransfers(
         fee,
         type,
         remark,
+        vestingDurationBlocks,
       }),
     )
   }

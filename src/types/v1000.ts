@@ -1,5 +1,19 @@
 import {sts, Result, Option, Bytes, BitSequence} from './support'
 
+export const VestingInfo: sts.Type<VestingInfo> = sts.struct(() => {
+    return  {
+        locked: sts.bigint(),
+        perBlock: sts.bigint(),
+        startingBlock: sts.number(),
+    }
+})
+
+export interface VestingInfo {
+    locked: bigint
+    perBlock: bigint
+    startingBlock: number
+}
+
 export const BalanceStatus: sts.Type<BalanceStatus> = sts.closedEnum(() => {
     return  {
         Free: sts.unit(),

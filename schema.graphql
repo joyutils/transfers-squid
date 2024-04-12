@@ -15,6 +15,7 @@ type Transfer @entity {
   to: Account!
   amount: BigInt! @index
   fee: BigInt! # fee is calculated at the best effort and may be zero for some old extrinsics
-  type: String! # "transfer" | "remark"
+  type: String! @index # "transfer" | "remark" | "vested"
   remark: String
+  vestingDurationBlocks: BigInt
 }

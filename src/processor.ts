@@ -47,6 +47,11 @@ export const processor = new SubstrateBatchProcessor()
     extrinsic: true,
     events: true,
   })
+  .addCall({
+    name: [calls.vesting.vestedTransfer.name],
+    extrinsic: true,
+    events: true,
+  })
   .setFields({
     event: {
       args: true,
